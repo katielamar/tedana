@@ -16,6 +16,7 @@ from typing import List
 import nibabel as nib
 import numpy as np
 import pandas as pd
+import requests
 from nilearn._utils import check_niimg
 from nilearn.image import new_img_like
 
@@ -502,6 +503,52 @@ def load_json(path: str) -> dict:
     return data
 
 
+def download_json(tree: str, out_dir: str) -> str:
+    """Download a json file from figshare unless the file already exists.
+
+    Parameters
+    ----------
+    tree : str
+        The name of the tree to download
+    out_dir : str
+        The directory where the json file will be saved
+
+    Returns
+    -------
+    save_path : str
+        The filepath of the downloaded decision tree.
+    """
+    base_url = "https://api.figshare.com/v2"
+    item_id = 25251433
+
+    fname = tree + ".json" if not tree.endswith(".json") else tree
+    save_path = op.join(out_dir, fname)
+
+    if op.isfile(save_path):
+        return save_path
+
+    try:
+        r = requests.get(f"{base_url}/articles/{item_id}")
+        r.raise_for_status()
+        metadata = r.json()
+
+        file_info = next((f for f in metadata["files"] if f["name"] == fname.lower()), None)
+
+        if not file_info:
+            return
+
+        download_r = requests.get(file_info["download_url"])
+        download_r.raise_for_status()
+
+        with open(save_path, "wb") as f:
+            f.write(download_r.content)
+        LGR.info(f"Tree {tree} downloaded from figshare to {save_path}")
+        return save_path
+
+    except requests.RequestException as e:
+        LGR.error(f"Cannot connect to figshare: {e}")
+
+
 def add_decomp_prefix(comp_num, prefix, max_value):
     """Create component name with leading zeros matching number of components.
 
@@ -761,7 +808,7 @@ def writeresults_echoes(data_cat, mixing, mask, component_table, io_generator):
 
 
 # File Loading Functions
-def load_data(data, n_echos=None):
+def load_data(data, n_echos=None, dummy_scans=0):
     """Coerce input `data` files to required 3D array output.
 
     Parameters
@@ -772,6 +819,8 @@ def load_data(data, n_echos=None):
     n_echos : :obj:`int`, optional
         Number of echos in provided data array. Only necessary if `data` is a single,
         z-concatenated file. Default: None
+    dummy_scans : :obj:`int`, optional
+        Number of dummy scans in the fMRI time series. Default: 0
 
     Returns
     -------
@@ -800,12 +849,21 @@ def load_data(data, n_echos=None):
             fdata = np.stack([utils.reshape_niimg(f) for f in data], axis=1)
             ref_img = check_niimg(data[0])
             ref_img.header.extensions = []
-            return np.atleast_3d(fdata), ref_img
+
+            fdata = np.atleast_3d(fdata)
+            if dummy_scans != 0:
+                fdata = fdata[..., dummy_scans:]
+
+            return fdata, ref_img
 
     # Z-concatenated file/img
     img = check_niimg(data)
     (nx, ny), nz = img.shape[:2], img.shape[2] // n_echos
     fdata = utils.reshape_niimg(img.get_fdata().reshape(nx, ny, nz, n_echos, -1, order="F"))
+
+    if dummy_scans != 0:
+        fdata = fdata[..., dummy_scans:]
+
     # create reference image
     ref_img = img.__class__(
         np.zeros((nx, ny, nz, 1)), affine=img.affine, header=img.header, extra=img.extra

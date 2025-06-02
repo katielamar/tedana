@@ -90,7 +90,7 @@ def tedpca(
         (stationary Gaussian) process and are ordered from most to least aggressive
         (see :footcite:p:`li2007estimating`).
         If a float is provided, then it is assumed to represent percentage of variance
-        explained (0-1) to retain from PCA.
+        explained (0.0-1.0) to retain from PCA.
         If an int is provided, then it is assumed to be the number of components
         to select
         Default is 'aic'.
@@ -354,7 +354,7 @@ def tedpca(
         "d_table_score",
     ]
     # Even if user inputted, don't fit external_regressors to PCA components
-    component_table, _ = metrics.collect.generate_metrics(
+    component_table, comp_ts = metrics.collect.generate_metrics(
         data_cat=data_cat,
         data_optcom=data_optcom,
         mixing=comp_ts,
